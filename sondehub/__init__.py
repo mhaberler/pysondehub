@@ -8,19 +8,25 @@ from botocore.config import Config
 import sys
 import threading
 from queue import Queue
-import queue
 
 
 S3_BUCKET = "sondehub-open-data"
 
 
 class Stream:
-    def __init__(self, sondes: list = ["#"], on_connect=None, on_message=None):
+    def __init__(self, sondes: list = ["#"],
+                 on_connect=None,
+                 on_disconnect=None,
+                 on_log=None,
+                 on_message=None):
         self.mqttc = mqtt.Client(transport="websockets")
         self._sondes = sondes
         self.ws_connect()
         self.on_connect = on_connect
+        self.on_disconnect = on_disconnect
         self.on_message = on_message
+        self.on_log = on_log
+        self.connected = False
 
     def add_sonde(self, sonde):
         if sonde not in self._sondes:
@@ -41,10 +47,10 @@ class Stream:
         headers = {
             "Host": "{0:s}".format(urlparts.netloc),
         }
-
         self.mqttc.on_message = self._on_message  # self.on_message
         self.mqttc.on_connect = self._on_connect
         self.mqttc.on_disconnect = self._on_disconnect
+        self.mqttc.on_log = self._on_log
 
         self.mqttc.ws_set_options(
             path="{}?{}".format(urlparts.path, urlparts.query), headers=headers
@@ -70,18 +76,29 @@ class Stream:
             self.on_message(json.loads(msg.payload))
 
     def _on_connect(self, mqttc, obj, flags, rc):
+        
         if mqtt.MQTT_ERR_SUCCESS != rc:
             self.ws_connect()
+        self.connected = True 
         if self.on_connect:
             self.on_connect()
 
     def _on_disconnect(self, client, userdata, rc):
-        self.ws_connect()
+        self.mqttc.loop_stop()
+        self.connected = False
+        if self.on_disconnect:
+            self.on_disconnect()
 
+    def _on_log(self, *args, **kwargs):
+        if self.on_log:
+            self.on_log(*args, **kwargs)
+        
     def __exit__(self, type, value, traceback):
         self.mqttc.disconnect()
 
     def disconnect(self):
+        if self.on_disconnect:
+            self.on_disconnect()
         self.mqttc.disconnect()
 
 
